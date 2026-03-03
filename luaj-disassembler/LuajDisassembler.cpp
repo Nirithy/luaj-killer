@@ -14,12 +14,28 @@ namespace Luaj {
 
     void LuajDisassembler::printFunction(const LuajPrototype& pt) {
         printHeader(pt);
-        printCode(pt);
-        printConstants(pt);
-        printLocals(pt);
-        printUpvalues(pt);
 
-        for (const auto& child : pt.prototypes) {
+        LuajAnalyzer analyzer(pt);
+        analyzer.analyze();
+
+        printCode(pt, analyzer);
+        printConstants(pt, analyzer);
+        printLocals(pt);
+        printUpvalues(pt, analyzer);
+
+        for (size_t i = 0; i < pt.prototypes.size(); ++i) {
+            const auto& child = pt.prototypes[i];
+            const auto& fun_xrefs = analyzer.getCrossReferences().functions_xrefs;
+
+            // Just display XREFs above the function block header
+            auto it = fun_xrefs.find(i);
+            if (it != fun_xrefs.end() && !it->second.empty()) {
+                std::cout << "\n; XREFs to function " << i << ": ";
+                for (size_t j = 0; j < it->second.size(); ++j) {
+                    if (j > 0) std::cout << ", ";
+                    std::cout << "loc_" << it->second[j] + 1;
+                }
+            }
             printFunction(child);
         }
     }
@@ -55,13 +71,35 @@ namespace Luaj {
         return "?";
     }
 
-    void LuajDisassembler::printCode(const LuajPrototype& pt) {
-        for (size_t i = 0; i < pt.code.size(); ++i) {
-            printOpcode(pt.code[i], i, pt);
+    void LuajDisassembler::printCode(const LuajPrototype& pt, const LuajAnalyzer& analyzer) {
+        const auto& blocks = analyzer.getBasicBlocks();
+        for (const auto& bb : blocks) {
+            std::cout << "\nloc_" << bb.start_pc + 1 << ":\n";
+            if (!bb.predecessors.empty()) {
+                std::cout << "  ; Predecessors: ";
+                for (auto it = bb.predecessors.begin(); it != bb.predecessors.end(); ++it) {
+                    if (it != bb.predecessors.begin()) std::cout << ", ";
+                    std::cout << "loc_" << blocks[*it].start_pc + 1;
+                }
+                std::cout << "\n";
+            }
+
+            for (int pc = bb.start_pc; pc <= bb.end_pc; ++pc) {
+                printOpcode(pt.code[pc], pc, pt, analyzer);
+            }
+
+            if (!bb.successors.empty()) {
+                std::cout << "  ; Successors: ";
+                for (auto it = bb.successors.begin(); it != bb.successors.end(); ++it) {
+                    if (it != bb.successors.begin()) std::cout << ", ";
+                    std::cout << "loc_" << blocks[*it].start_pc + 1;
+                }
+                std::cout << "\n";
+            }
         }
     }
 
-    void LuajDisassembler::printOpcode(uint32_t i, int pc, const LuajPrototype& pt) {
+    void LuajDisassembler::printOpcode(uint32_t i, int pc, const LuajPrototype& pt, const LuajAnalyzer& analyzer) {
         int o = GET_OPCODE(i);
         int a = GETARG_A(i);
         int b = GETARG_B(i);
@@ -101,6 +139,12 @@ namespace Luaj {
                 break;
         }
 
+        // If it's a jump, print the target loc
+        if (o == 23 || o == 32 || o == 33 || o == 35) { // OP_JMP, OP_FORLOOP, OP_FORPREP, OP_TFORLOOP
+            int target = pc + 1 + sbx;
+            std::cout << "  ; -> loc_" << target + 1;
+        }
+
         // Output some helpful comments based on instruction type
         switch (o) {
             case 1: // LOADK
@@ -122,29 +166,54 @@ namespace Luaj {
         std::cout << "\n";
     }
 
-    void LuajDisassembler::printConstants(const LuajPrototype& pt) {
+    void LuajDisassembler::printConstants(const LuajPrototype& pt, const LuajAnalyzer& analyzer) {
         if (pt.constants.empty()) return;
-        std::cout << "constants (" << pt.constants.size() << ") for " << std::hex << &pt << std::dec << ":\n";
+        std::cout << "\nconstants (" << pt.constants.size() << ") for " << std::hex << &pt << std::dec << ":\n";
+        const auto& const_xrefs = analyzer.getCrossReferences().constants_xrefs;
+
         for (size_t i = 0; i < pt.constants.size(); ++i) {
-            std::cout << "\t" << i + 1 << "\t" << constantToString(pt.constants[i]) << "\n";
+            std::cout << "\t" << i + 1 << "\t" << std::left << std::setw(20) << constantToString(pt.constants[i]);
+
+            auto it = const_xrefs.find(i);
+            if (it != const_xrefs.end() && !it->second.empty()) {
+                std::cout << " ; XREFs: ";
+                for (size_t j = 0; j < it->second.size(); ++j) {
+                    if (j > 0) std::cout << ", ";
+                    std::cout << "loc_" << it->second[j] + 1;
+                }
+            }
+            std::cout << "\n";
         }
     }
 
     void LuajDisassembler::printLocals(const LuajPrototype& pt) {
         if (pt.locvars.empty()) return;
-        std::cout << "locals (" << pt.locvars.size() << ") for " << std::hex << &pt << std::dec << ":\n";
+        std::cout << "\nlocals (" << pt.locvars.size() << ") for " << std::hex << &pt << std::dec << ":\n";
         for (size_t i = 0; i < pt.locvars.size(); ++i) {
             std::cout << "\t" << i << "\t" << pt.locvars[i].varname << "\t"
-                      << pt.locvars[i].startpc + 1 << "\t" << pt.locvars[i].endpc + 1 << "\n";
+                      << "loc_" << pt.locvars[i].startpc + 1 << "\t" << "loc_" << pt.locvars[i].endpc + 1 << "\n";
         }
     }
 
-    void LuajDisassembler::printUpvalues(const LuajPrototype& pt) {
+    void LuajDisassembler::printUpvalues(const LuajPrototype& pt, const LuajAnalyzer& analyzer) {
         if (pt.upvalues.empty()) return;
-        std::cout << "upvalues (" << pt.upvalues.size() << ") for " << std::hex << &pt << std::dec << ":\n";
+        std::cout << "\nupvalues (" << pt.upvalues.size() << ") for " << std::hex << &pt << std::dec << ":\n";
+        const auto& upval_xrefs = analyzer.getCrossReferences().upvalues_xrefs;
+
         for (size_t i = 0; i < pt.upvalues.size(); ++i) {
-            std::cout << "\t" << i << "\t" << (pt.upvalues[i].name.empty() ? "-" : pt.upvalues[i].name)
-                      << "\t" << pt.upvalues[i].instack << "\t" << (int)pt.upvalues[i].idx << "\n";
+            std::string name = pt.upvalues[i].name.empty() ? "-" : pt.upvalues[i].name;
+            std::cout << "\t" << i << "\t" << std::left << std::setw(10) << name
+                      << "\t" << pt.upvalues[i].instack << "\t" << (int)pt.upvalues[i].idx;
+
+            auto it = upval_xrefs.find(i);
+            if (it != upval_xrefs.end() && !it->second.empty()) {
+                std::cout << "\t; XREFs: ";
+                for (size_t j = 0; j < it->second.size(); ++j) {
+                    if (j > 0) std::cout << ", ";
+                    std::cout << "loc_" << it->second[j] + 1;
+                }
+            }
+            std::cout << "\n";
         }
     }
 
