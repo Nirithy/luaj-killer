@@ -23,6 +23,7 @@ namespace Luaj {
         void printLocals(const LuajPrototype& pt);
         void printUpvalues(const LuajPrototype& pt, const LuajAnalyzer& analyzer);
         void printGlobals(const LuajPrototype& pt, const LuajAnalyzer& analyzer);
+        void printExports(const LuajPrototype& pt, const LuajAnalyzer& analyzer);
 
         std::string constantToString(const LuajConstant& k);
         void printOpcode(uint32_t i, int pc, const LuajPrototype& pt, const LuajAnalyzer& analyzer);

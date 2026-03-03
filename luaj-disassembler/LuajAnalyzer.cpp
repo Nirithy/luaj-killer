@@ -191,6 +191,17 @@ namespace Luaj {
             if (o == 37) { // CLOSURE
                 xrefs_.functions_xrefs[bx].push_back(i);
             }
+
+            // Exports (SETTABLE tracking)
+            if (o == 10) { // SETTABLE
+                if (ISK(b)) {
+                    int const_idx = INDEXK(b);
+                    if ((size_t)const_idx < pt_.constants.size() && pt_.constants[const_idx].type == TSTRING) {
+                        std::string export_name = std::get<std::string>(pt_.constants[const_idx].value);
+                        xrefs_.exports_xrefs[export_name].push_back(i);
+                    }
+                }
+            }
         }
     }
 
@@ -201,6 +212,7 @@ namespace Luaj {
             int a = GETARG_A(inst);
             int b = GETARG_B(inst);
             int c = GETARG_C(inst);
+            int bx = GETARG_Bx(inst);
 
             InstructionDataFlow df;
 
@@ -223,6 +235,9 @@ namespace Luaj {
                     df.uses.push_back(b);
                     break;
                 case 1: // LOADK
+                    df.defs.push_back(a);
+                    df.constants.push_back(bx);
+                    break;
                 case 2: // LOADKX
                 case 3: // LOADBOOL
                 case 4: // LOADNIL
@@ -233,15 +248,19 @@ namespace Luaj {
                 case 6: // GETTABUP
                     df.defs.push_back(a);
                     if (!ISK(c)) df.uses.push_back(c);
+                    else df.constants.push_back(INDEXK(c));
                     break;
                 case 7: // GETTABLE
                     df.defs.push_back(a);
                     df.uses.push_back(b);
                     if (!ISK(c)) df.uses.push_back(c);
+                    else df.constants.push_back(INDEXK(c));
                     break;
                 case 8: // SETTABUP
                     if (!ISK(b)) df.uses.push_back(b);
+                    else df.constants.push_back(INDEXK(b));
                     if (!ISK(c)) df.uses.push_back(c);
+                    else df.constants.push_back(INDEXK(c));
                     break;
                 case 9: // SETUPVAL
                     df.uses.push_back(a);
@@ -249,7 +268,9 @@ namespace Luaj {
                 case 10: // SETTABLE
                     df.uses.push_back(a);
                     if (!ISK(b)) df.uses.push_back(b);
+                    else df.constants.push_back(INDEXK(b));
                     if (!ISK(c)) df.uses.push_back(c);
+                    else df.constants.push_back(INDEXK(c));
                     break;
                 case 11: // NEWTABLE
                     df.defs.push_back(a);
@@ -259,6 +280,7 @@ namespace Luaj {
                     df.defs.push_back(a + 1);
                     df.uses.push_back(b);
                     if (!ISK(c)) df.uses.push_back(c);
+                    else df.constants.push_back(INDEXK(c));
                     break;
                 case 13: // ADD
                 case 14: // SUB
@@ -268,7 +290,9 @@ namespace Luaj {
                 case 18: // POW
                     df.defs.push_back(a);
                     if (!ISK(b)) df.uses.push_back(b);
+                    else df.constants.push_back(INDEXK(b));
                     if (!ISK(c)) df.uses.push_back(c);
+                    else df.constants.push_back(INDEXK(c));
                     break;
                 case 19: // UNM
                 case 20: // NOT
@@ -291,7 +315,9 @@ namespace Luaj {
                 case 25: // LT
                 case 26: // LE
                     if (!ISK(b)) df.uses.push_back(b);
+                    else df.constants.push_back(INDEXK(b));
                     if (!ISK(c)) df.uses.push_back(c);
+                    else df.constants.push_back(INDEXK(c));
                     break;
                 case 27: // TEST
                     df.uses.push_back(a);

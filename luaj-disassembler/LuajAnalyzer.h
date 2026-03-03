@@ -20,11 +20,13 @@ namespace Luaj {
         std::map<int, std::vector<int>> upvalues_xrefs;  // Upvalue index -> List of PCs
         std::map<int, std::vector<int>> functions_xrefs; // Function index -> List of PCs
         std::map<std::string, std::vector<int>> globals_xrefs; // Global name -> List of PCs
+        std::map<std::string, std::vector<int>> exports_xrefs; // Exported keys -> List of PCs
     };
 
     struct InstructionDataFlow {
         std::vector<int> defs; // Registers defined (written to)
         std::vector<int> uses; // Registers used (read from)
+        std::vector<int> constants; // Constants used
     };
 
     class LuajAnalyzer {

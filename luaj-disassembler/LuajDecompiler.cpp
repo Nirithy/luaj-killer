@@ -1,0 +1,239 @@
+#include "LuajDecompiler.h"
+#include "LuajOpcodes.h"
+#include <iostream>
+#include <sstream>
+
+namespace Luaj {
+
+    std::string AstNumber::toString() const {
+        std::stringstream ss;
+        ss << value;
+        return ss.str();
+    }
+
+    std::string AstString::toString() const {
+        return "\"" + value + "\"";
+    }
+
+    std::string AstBoolean::toString() const {
+        return value ? "true" : "false";
+    }
+
+    LuajDecompiler::LuajDecompiler(const LuajPrototype& pt, const LuajAnalyzer& analyzer)
+        : pt_(pt), analyzer_(analyzer) {}
+
+    std::shared_ptr<AstNode> LuajDecompiler::getConstantAst(int idx) {
+        if ((size_t)idx >= pt_.constants.size()) return std::make_shared<AstIdentifier>("UNKNOWN_CONST");
+        const auto& k = pt_.constants[idx];
+        if (k.type == TNIL) return std::make_shared<AstNil>();
+        if (k.type == TBOOLEAN) return std::make_shared<AstBoolean>(std::get<bool>(k.value));
+        if (k.type == TNUMBER) {
+            if (std::holds_alternative<double>(k.value)) {
+                return std::make_shared<AstNumber>(std::get<double>(k.value));
+            } else if (std::holds_alternative<int32_t>(k.value)) {
+                return std::make_shared<AstNumber>(std::get<int32_t>(k.value));
+            }
+        }
+        if (k.type == TSTRING) {
+            return std::make_shared<AstString>(std::get<std::string>(k.value));
+        }
+        return std::make_shared<AstIdentifier>("?");
+    }
+
+    std::shared_ptr<AstNode> LuajDecompiler::getRK(int rk) {
+        if (ISK(rk)) {
+            return getConstantAst(INDEXK(rk));
+        } else {
+            // For now, assume param R0...R[numparams-1]
+            if (rk < pt_.numparams) {
+                if (rk < (int)pt_.locvars.size()) {
+                    return std::make_shared<AstIdentifier>(pt_.locvars[rk].varname);
+                }
+            }
+
+            if (registers_.find(rk) != registers_.end()) {
+                return registers_[rk];
+            }
+            return std::make_shared<AstIdentifier>("R" + std::to_string(rk));
+        }
+    }
+
+    std::string LuajDecompiler::getUpvalueName(int idx) {
+        if ((size_t)idx < pt_.upvalues.size() && !pt_.upvalues[idx].name.empty()) {
+            return pt_.upvalues[idx].name;
+        }
+        return "UPVAL_" + std::to_string(idx);
+    }
+
+    void LuajDecompiler::decompile() {
+        std::cout << "\n; --- Pseudo-code Decompilation ---\n";
+        std::cout << "function " << (pt_.source.empty() ? "?" : pt_.source) << "() -- " << pt_.linedefined << "\n";
+
+        // Very linear traversal, doesn't do true SSA or complex loop recovery
+        // Just attempts to map opcodes to inline expressions
+
+        for (size_t i = 0; i < pt_.code.size(); ++i) {
+            uint32_t inst = pt_.code[i];
+            int o = GET_OPCODE(inst);
+            int a = GETARG_A(inst);
+            int b = GETARG_B(inst);
+            int c = GETARG_C(inst);
+            int bx = GETARG_Bx(inst);
+
+            std::shared_ptr<AstNode> stmt = nullptr;
+
+            switch (o) {
+                case 0: // MOVE
+                    registers_[a] = getRK(b);
+                    break;
+                case 1: // LOADK
+                    registers_[a] = getConstantAst(bx);
+                    break;
+                case 3: // LOADBOOL
+                    registers_[a] = std::make_shared<AstBoolean>(b != 0);
+                    // skipping C is not handled in this basic linear version
+                    break;
+                case 4: // LOADNIL
+                    for (int j = a; j <= b; ++j) {
+                        registers_[j] = std::make_shared<AstNil>();
+                    }
+                    break;
+                case 5: // GETUPVAL
+                    registers_[a] = std::make_shared<AstIdentifier>(getUpvalueName(b));
+                    break;
+                case 6: // GETTABUP
+                {
+                    auto upval = std::make_shared<AstIdentifier>(getUpvalueName(b));
+                    auto key = getRK(c);
+
+                    // If upvalue is _ENV and key is string, it's a global
+                    if (getUpvalueName(b) == "_ENV" && ISK(c) && pt_.constants[INDEXK(c)].type == TSTRING) {
+                        registers_[a] = std::make_shared<AstIdentifier>(std::get<std::string>(pt_.constants[INDEXK(c)].value));
+                    } else {
+                        registers_[a] = std::make_shared<AstTableAccess>(upval, key);
+                    }
+                    break;
+                }
+                case 7: // GETTABLE
+                    registers_[a] = std::make_shared<AstTableAccess>(getRK(b), getRK(c));
+                    break;
+                case 8: // SETTABUP
+                {
+                    auto upval = std::make_shared<AstIdentifier>(getUpvalueName(a));
+                    auto key = getRK(b);
+                    auto val = getRK(c);
+
+                    if (getUpvalueName(a) == "_ENV" && ISK(b) && pt_.constants[INDEXK(b)].type == TSTRING) {
+                        auto glob = std::make_shared<AstIdentifier>(std::get<std::string>(pt_.constants[INDEXK(b)].value));
+                        stmt = std::make_shared<AstAssignment>(glob, val);
+                    } else {
+                        auto tabAccess = std::make_shared<AstTableAccess>(upval, key);
+                        stmt = std::make_shared<AstAssignment>(tabAccess, val);
+                    }
+                    break;
+                }
+                case 9: // SETUPVAL
+                    stmt = std::make_shared<AstAssignment>(std::make_shared<AstIdentifier>(getUpvalueName(b)), getRK(a));
+                    break;
+                case 10: // SETTABLE
+                {
+                    auto tabAccess = std::make_shared<AstTableAccess>(getRK(a), getRK(b));
+                    stmt = std::make_shared<AstAssignment>(tabAccess, getRK(c));
+                    break;
+                }
+                case 11: // NEWTABLE
+                    registers_[a] = std::make_shared<AstIdentifier>("{}"); // Simplified
+                    break;
+                case 12: // SELF
+                {
+                    registers_[a+1] = registers_[b]; // The object
+                    registers_[a] = std::make_shared<AstTableAccess>(registers_[b], getRK(c)); // The method
+                    break;
+                }
+                case 13: // ADD
+                    registers_[a] = std::make_shared<AstBinaryOp>("+", getRK(b), getRK(c)); break;
+                case 14: // SUB
+                    registers_[a] = std::make_shared<AstBinaryOp>("-", getRK(b), getRK(c)); break;
+                case 15: // MUL
+                    registers_[a] = std::make_shared<AstBinaryOp>("*", getRK(b), getRK(c)); break;
+                case 16: // DIV
+                    registers_[a] = std::make_shared<AstBinaryOp>("/", getRK(b), getRK(c)); break;
+                case 17: // MOD
+                    registers_[a] = std::make_shared<AstBinaryOp>("%", getRK(b), getRK(c)); break;
+                case 18: // POW
+                    registers_[a] = std::make_shared<AstBinaryOp>("^", getRK(b), getRK(c)); break;
+                case 19: // UNM
+                    registers_[a] = std::make_shared<AstUnaryOp>("-", getRK(b)); break;
+                case 20: // NOT
+                    registers_[a] = std::make_shared<AstUnaryOp>("not ", getRK(b)); break;
+                case 21: // LEN
+                    registers_[a] = std::make_shared<AstUnaryOp>("#", getRK(b)); break;
+                case 22: // CONCAT
+                {
+                    std::shared_ptr<AstNode> expr = getRK(c);
+                    for (int r = c - 1; r >= b; --r) {
+                        expr = std::make_shared<AstBinaryOp>("..", getRK(r), expr);
+                    }
+                    registers_[a] = expr;
+                    break;
+                }
+                case 29: // CALL
+                {
+                    std::vector<std::shared_ptr<AstNode>> args;
+                    if (b > 1) {
+                        for (int arg_idx = a + 1; arg_idx < a + b; ++arg_idx) {
+                            args.push_back(getRK(arg_idx));
+                        }
+                    } else if (b == 0) {
+                        args.push_back(std::make_shared<AstIdentifier>("...")); // Simplified vararg
+                    }
+
+                    auto call = std::make_shared<AstFunctionCall>(getRK(a), args);
+                    if (c == 0 || c > 1) {
+                        // Returns assigned to registers. In our simplified model, just assign to 'a'
+                        registers_[a] = call;
+                    }
+                    if (c == 1) {
+                        // No return, it's a statement
+                        stmt = call;
+                    }
+                    break;
+                }
+                case 31: // RETURN
+                {
+                    std::vector<std::shared_ptr<AstNode>> rets;
+                    if (b > 1) {
+                        for (int r = a; r < a + b - 1; ++r) {
+                            rets.push_back(getRK(r));
+                        }
+                    } else if (b == 0) {
+                        rets.push_back(std::make_shared<AstIdentifier>("...")); // all open
+                    }
+
+                    std::string ret_str = "return ";
+                    for (size_t k = 0; k < rets.size(); ++k) {
+                        if (k > 0) ret_str += ", ";
+                        ret_str += rets[k]->toString();
+                    }
+                    std::cout << "  " << ret_str << "\n";
+                    break;
+                }
+                case 37: // CLOSURE
+                {
+                    std::string func_ptr = "<closure " + std::to_string(bx) + ">";
+                    registers_[a] = std::make_shared<AstIdentifier>(func_ptr);
+                    break;
+                }
+                default:
+                    // stmt = std::make_shared<AstIdentifier>("-- Instruction: " + std::string(OPNAMES[o]));
+                    break;
+            }
+
+            if (stmt) {
+                std::cout << "  " << stmt->toString() << "\n";
+            }
+        }
+        std::cout << "end\n";
+    }
+
+}

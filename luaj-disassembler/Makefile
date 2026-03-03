@@ -1,7 +1,7 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -O2 -Wall
 
-SRCS = main.cpp LuajParser.cpp LuajDisassembler.cpp LuajAnalyzer.cpp LuajAssembler.cpp
+SRCS = main.cpp LuajParser.cpp LuajDisassembler.cpp LuajAnalyzer.cpp LuajAssembler.cpp LuajDecompiler.cpp
 OBJS = $(SRCS:.cpp=.o)
 TARGET = luaj-disasm
 

@@ -24,6 +24,7 @@ namespace Luaj {
         printLocals(pt);
         printUpvalues(pt, analyzer);
         printGlobals(pt, analyzer);
+        printExports(pt, analyzer);
 
         for (size_t i = 0; i < pt.prototypes.size(); ++i) {
             const auto& child = pt.prototypes[i];
@@ -259,6 +260,23 @@ namespace Luaj {
                     if (j > 0) std::cout << ", ";
                     std::cout << "loc_" << it->second[j] + 1;
                 }
+            }
+            std::cout << "\n";
+        }
+    }
+
+    void LuajDisassembler::printExports(const LuajPrototype& pt, const LuajAnalyzer& analyzer) {
+        const auto& exports_xrefs = analyzer.getCrossReferences().exports_xrefs;
+        if (exports_xrefs.empty()) return;
+
+        std::cout << "\nexports (" << exports_xrefs.size() << ") for " << std::hex << &pt << std::dec << ":\n";
+
+        for (auto const& [name, pcs] : exports_xrefs) {
+            std::cout << "\t" << std::left << std::setw(20) << name;
+            std::cout << " ; XREFs: ";
+            for (size_t j = 0; j < pcs.size(); ++j) {
+                if (j > 0) std::cout << ", ";
+                std::cout << "loc_" << pcs[j] + 1;
             }
             std::cout << "\n";
         }
