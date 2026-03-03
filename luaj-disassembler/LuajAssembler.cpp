@@ -5,8 +5,36 @@
 
 namespace Luaj {
 
-    LuajAssembler::LuajAssembler(const LuajHeader& header, const LuajPrototype& mainPrototype)
+    LuajAssembler::LuajAssembler(const LuajHeader& header, LuajPrototype& mainPrototype)
         : header_(header), mainPrototype_(mainPrototype) {}
+
+    bool LuajAssembler::patchInstruction(int pc, uint32_t opcode, int a, int b, int c) {
+        if (pc < 1 || pc > (int)mainPrototype_.code.size()) {
+            error_ = "PC out of bounds";
+            return false;
+        }
+
+        uint32_t new_inst = 0;
+        int mode = getOpMode(opcode);
+        switch (mode) {
+            case iABC:
+                new_inst = CREATE_ABC(opcode, a, b, c);
+                break;
+            case iABx:
+                new_inst = CREATE_ABx(opcode, a, b);
+                break;
+            case iAsBx:
+                new_inst = CREATE_AsBx(opcode, a, b);
+                break;
+            case iAx:
+                new_inst = CREATE_Ax(opcode, a);
+                break;
+        }
+
+        // 0-based index
+        mainPrototype_.code[pc - 1] = new_inst;
+        return true;
+    }
 
     bool LuajAssembler::isHostLittleEndian() {
         uint16_t x = 0x0001;

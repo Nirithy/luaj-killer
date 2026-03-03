@@ -8,13 +8,14 @@ namespace Luaj {
 
     class LuajAssembler {
     public:
-        LuajAssembler(const LuajHeader& header, const LuajPrototype& mainPrototype);
+        LuajAssembler(const LuajHeader& header, LuajPrototype& mainPrototype);
         bool assemble(const std::string& filename);
+        bool patchInstruction(int pc, uint32_t opcode, int a, int b, int c);
         std::string getError() const { return error_; }
 
     private:
         const LuajHeader& header_;
-        const LuajPrototype& mainPrototype_;
+        LuajPrototype& mainPrototype_;
         std::ofstream file_;
         std::string error_;
 
