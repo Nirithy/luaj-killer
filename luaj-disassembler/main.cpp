@@ -5,16 +5,31 @@
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <luac_file>\n";
+        std::cerr << "Usage: " << argv[0] << " [--dot <output.dot>] <luac_file>\n";
         return 1;
     }
 
-    std::string filename = argv[1];
+    std::string dot_filename = "";
+    std::string filename = "";
+
+    if (argc >= 4 && std::string(argv[1]) == "--dot") {
+        dot_filename = argv[2];
+        filename = argv[3];
+    } else {
+        filename = argv[1];
+    }
+
     Luaj::LuajParser parser(filename);
 
     if (!parser.parse()) {
         std::cerr << "Error parsing file: " << parser.getError() << "\n";
         return 1;
+    }
+
+    if (!dot_filename.empty()) {
+        Luaj::LuajDisassembler disassembler(parser.getMainPrototype());
+        disassembler.exportToDot(dot_filename);
+        return 0;
     }
 
     // Optional: Print header information

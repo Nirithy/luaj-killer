@@ -2,6 +2,7 @@
 #include "LuajOpcodes.h"
 #include <iomanip>
 #include <sstream>
+#include <fstream>
 
 namespace Luaj {
 
@@ -22,6 +23,7 @@ namespace Luaj {
         printConstants(pt, analyzer);
         printLocals(pt);
         printUpvalues(pt, analyzer);
+        printGlobals(pt, analyzer);
 
         for (size_t i = 0; i < pt.prototypes.size(); ++i) {
             const auto& child = pt.prototypes[i];
@@ -163,7 +165,83 @@ namespace Luaj {
                 break;
         }
 
+        const auto& df = analyzer.getDataFlow();
+        auto df_it = df.find(pc);
+        if (df_it != df.end() && (!df_it->second.defs.empty() || !df_it->second.uses.empty())) {
+            std::cout << "  ; [";
+            if (!df_it->second.defs.empty()) {
+                std::cout << "Defs: ";
+                for (size_t i = 0; i < df_it->second.defs.size(); ++i) {
+                    if (i > 0) std::cout << ",";
+                    std::cout << "R" << df_it->second.defs[i];
+                }
+                if (!df_it->second.uses.empty()) std::cout << " ";
+            }
+            if (!df_it->second.uses.empty()) {
+                std::cout << "Uses: ";
+                for (size_t i = 0; i < df_it->second.uses.size(); ++i) {
+                    if (i > 0) std::cout << ",";
+                    std::cout << "R" << df_it->second.uses[i];
+                }
+            }
+            std::cout << "]";
+        }
+
         std::cout << "\n";
+    }
+
+    std::string LuajDisassembler::getOpcodeString(uint32_t i, int pc, const LuajPrototype& pt, const LuajAnalyzer& analyzer) {
+        std::stringstream ss;
+        int o = GET_OPCODE(i);
+        int a = GETARG_A(i);
+        int b = GETARG_B(i);
+        int c = GETARG_C(i);
+        int bx = GETARG_Bx(i);
+        int sbx = GETARG_sBx(i);
+        int ax = GETARG_Ax(i);
+
+        ss << pc + 1 << "  ";
+        const char* name = (o < 40) ? OPNAMES[o] : "UNKNOWN";
+        ss << std::left << std::setw(10) << name << " ";
+
+        int mode = getOpMode(o);
+        switch (mode) {
+            case iABC:
+                ss << a;
+                if (getBMode(o) != OpArgN) ss << " " << (ISK(b) ? (-1 - INDEXK(b)) : b);
+                if (getCMode(o) != OpArgN) ss << " " << (ISK(c) ? (-1 - INDEXK(c)) : c);
+                break;
+            case iABx:
+                if (getBMode(o) == OpArgK) ss << a << " " << -1 - bx;
+                else ss << a << " " << bx;
+                break;
+            case iAsBx:
+                if (o == 23) ss << sbx;
+                else ss << a << " " << sbx;
+                break;
+            case iAx:
+                ss << -1 - ax;
+                break;
+        }
+
+        if (o == 23 || o == 32 || o == 33 || o == 35) {
+            int target = pc + 1 + sbx;
+            ss << "  ; -> loc_" << target + 1;
+        }
+
+        switch (o) {
+            case 1:
+                ss << "  ; " << constantToString(pt.constants[bx]);
+                break;
+            case 5:
+            case 9:
+                if ((size_t)b < pt.upvalues.size()) {
+                    ss << "  ; " << pt.upvalues[b].name;
+                }
+                break;
+        }
+
+        return ss.str();
     }
 
     void LuajDisassembler::printConstants(const LuajPrototype& pt, const LuajAnalyzer& analyzer) {
@@ -181,6 +259,23 @@ namespace Luaj {
                     if (j > 0) std::cout << ", ";
                     std::cout << "loc_" << it->second[j] + 1;
                 }
+            }
+            std::cout << "\n";
+        }
+    }
+
+    void LuajDisassembler::printGlobals(const LuajPrototype& pt, const LuajAnalyzer& analyzer) {
+        const auto& globals_xrefs = analyzer.getCrossReferences().globals_xrefs;
+        if (globals_xrefs.empty()) return;
+
+        std::cout << "\nglobals (" << globals_xrefs.size() << ") for " << std::hex << &pt << std::dec << ":\n";
+
+        for (auto const& [name, pcs] : globals_xrefs) {
+            std::cout << "\t" << std::left << std::setw(20) << name;
+            std::cout << " ; XREFs: ";
+            for (size_t j = 0; j < pcs.size(); ++j) {
+                if (j > 0) std::cout << ", ";
+                std::cout << "loc_" << pcs[j] + 1;
             }
             std::cout << "\n";
         }
@@ -214,6 +309,66 @@ namespace Luaj {
                 }
             }
             std::cout << "\n";
+        }
+    }
+
+    void LuajDisassembler::exportToDot(const std::string& filename) {
+        std::ofstream out(filename);
+        if (!out) {
+            std::cerr << "Error: Could not open file " << filename << " for writing DOT graph.\n";
+            return;
+        }
+
+        out << "digraph LuajCFG {\n";
+        out << "  node [shape=box, fontname=\"Courier New\"];\n";
+
+        int cluster_id = 0;
+        exportFunctionToDot(mainPrototype_, out, cluster_id);
+
+        out << "}\n";
+        out.close();
+        std::cout << "Exported CFG to " << filename << "\n";
+    }
+
+    void LuajDisassembler::exportFunctionToDot(const LuajPrototype& pt, std::ostream& out, int& cluster_id) {
+        LuajAnalyzer analyzer(pt);
+        analyzer.analyze();
+
+        int current_cluster = cluster_id++;
+
+        out << "  subgraph cluster_" << current_cluster << " {\n";
+        out << "    label=\"Function at line " << pt.linedefined << "\";\n";
+
+        const auto& blocks = analyzer.getBasicBlocks();
+        std::string prefix = "f" + std::to_string(current_cluster) + "_";
+
+        // Define nodes
+        for (const auto& bb : blocks) {
+            out << "    " << prefix << "bb_" << bb.id << " [label=\"loc_" << bb.start_pc + 1 << ":\\l";
+            for (int pc = bb.start_pc; pc <= bb.end_pc; ++pc) {
+                // Escape quotes for dot
+                std::string inst_str = getOpcodeString(pt.code[pc], pc, pt, analyzer);
+                size_t pos = 0;
+                while((pos = inst_str.find("\"", pos)) != std::string::npos) {
+                    inst_str.replace(pos, 1, "\\\"");
+                    pos += 2;
+                }
+                out << inst_str << "\\l";
+            }
+            out << "\"];\n";
+        }
+
+        // Define edges
+        for (const auto& bb : blocks) {
+            for (int succ : bb.successors) {
+                out << "    " << prefix << "bb_" << bb.id << " -> " << prefix << "bb_" << succ << ";\n";
+            }
+        }
+
+        out << "  }\n";
+
+        for (const auto& child : pt.prototypes) {
+            exportFunctionToDot(child, out, cluster_id);
         }
     }
 
