@@ -1,22 +1,34 @@
 #include "LuajParser.h"
 #include "LuajDisassembler.h"
+#include "LuajAssembler.h"
+#include "LuajOpcodes.h"
 #include <iostream>
 #include <iomanip>
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " [--dot <output.dot>] <luac_file>\n";
+        std::cerr << "Usage: " << argv[0] << " [--dot <output.dot>] [--patch <output.luac>] <luac_file>\n";
         return 1;
     }
 
     std::string dot_filename = "";
+    std::string patch_filename = "";
     std::string filename = "";
 
-    if (argc >= 4 && std::string(argv[1]) == "--dot") {
-        dot_filename = argv[2];
-        filename = argv[3];
-    } else {
-        filename = argv[1];
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--dot" && i + 1 < argc) {
+            dot_filename = argv[++i];
+        } else if (arg == "--patch" && i + 1 < argc) {
+            patch_filename = argv[++i];
+        } else {
+            filename = arg;
+        }
+    }
+
+    if (filename.empty()) {
+        std::cerr << "Error: No input file specified.\n";
+        return 1;
     }
 
     Luaj::LuajParser parser(filename);
@@ -24,6 +36,22 @@ int main(int argc, char** argv) {
     if (!parser.parse()) {
         std::cerr << "Error parsing file: " << parser.getError() << "\n";
         return 1;
+    }
+
+    if (!patch_filename.empty()) {
+        Luaj::LuajPrototype& pt = parser.getMainPrototype();
+
+        // Example patch: add a new NOP-like (e.g. EXTRAARG) at the end,
+        // or just re-assemble the file to test binary parity
+        std::cout << "Applying patch and saving to " << patch_filename << "...\n";
+
+        Luaj::LuajAssembler assembler(parser.getHeader(), pt);
+        if (!assembler.assemble(patch_filename)) {
+            std::cerr << "Error assembling file: " << assembler.getError() << "\n";
+            return 1;
+        }
+        std::cout << "Successfully patched to " << patch_filename << "\n";
+        return 0;
     }
 
     if (!dot_filename.empty()) {

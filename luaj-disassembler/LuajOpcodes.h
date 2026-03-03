@@ -151,4 +151,27 @@ namespace Luaj {
     inline bool ISK(int x) { return x >= (1 << (SIZE_B - 1)); }
     inline int INDEXK(int r) { return r & ~(1 << (SIZE_B - 1)); }
 
+    // Instruction creation macros
+    inline uint32_t CREATE_ABC(int o, int a, int b, int c) {
+        return ((uint32_t)o << POS_OP) |
+               ((uint32_t)a << POS_A) |
+               ((uint32_t)b << POS_B) |
+               ((uint32_t)c << POS_C);
+    }
+
+    inline uint32_t CREATE_ABx(int o, int a, int bx) {
+        return ((uint32_t)o << POS_OP) |
+               ((uint32_t)a << POS_A) |
+               ((uint32_t)bx << POS_Bx);
+    }
+
+    inline uint32_t CREATE_AsBx(int o, int a, int sbx) {
+        return CREATE_ABx(o, a, sbx + MAXARG_sBx);
+    }
+
+    inline uint32_t CREATE_Ax(int o, int ax) {
+        return ((uint32_t)o << POS_OP) |
+               ((uint32_t)ax << POS_Ax);
+    }
+
 }

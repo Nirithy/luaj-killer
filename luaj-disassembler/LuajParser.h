@@ -12,6 +12,7 @@ namespace Luaj {
         bool parse();
         const LuajHeader& getHeader() const { return header_; }
         const LuajPrototype& getMainPrototype() const { return mainPrototype_; }
+        LuajPrototype& getMainPrototype() { return mainPrototype_; }
         std::string getError() const { return error_; }
 
     private:
