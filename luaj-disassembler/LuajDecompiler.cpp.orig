@@ -147,12 +147,8 @@ namespace Luaj {
                     break;
                 case 12: // SELF
                 {
-                    auto obj = registers_[b];
-                    if (!obj) {
-                        obj = std::make_shared<AstIdentifier>("R" + std::to_string(b));
-                    }
-                    registers_[a+1] = obj; // The object
-                    registers_[a] = std::make_shared<AstTableAccess>(obj, getRK(c)); // The method
+                    registers_[a+1] = registers_[b]; // The object
+                    registers_[a] = std::make_shared<AstTableAccess>(registers_[b], getRK(c)); // The method
                     break;
                 }
                 case 13: // ADD

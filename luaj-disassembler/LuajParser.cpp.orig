@@ -113,10 +113,6 @@ namespace Luaj {
 
     bool LuajParser::parseHeader() {
         file_.read(reinterpret_cast<char*>(header_.signature), 4);
-        if (file_.gcount() != 4) {
-            error_ = "Incomplete or missing signature";
-            return false;
-        }
         if (std::memcmp(header_.signature, "\033Lua", 4) != 0) {
             error_ = "Invalid Luaj signature";
             return false;
