@@ -19,6 +19,12 @@ namespace Luaj {
         std::map<int, std::vector<int>> constants_xrefs; // Constant index -> List of PCs
         std::map<int, std::vector<int>> upvalues_xrefs;  // Upvalue index -> List of PCs
         std::map<int, std::vector<int>> functions_xrefs; // Function index -> List of PCs
+        std::map<std::string, std::vector<int>> globals_xrefs; // Global name -> List of PCs
+    };
+
+    struct InstructionDataFlow {
+        std::vector<int> defs; // Registers defined (written to)
+        std::vector<int> uses; // Registers used (read from)
     };
 
     class LuajAnalyzer {
@@ -29,6 +35,7 @@ namespace Luaj {
 
         const std::vector<BasicBlock>& getBasicBlocks() const { return basicBlocks_; }
         const CrossReferences& getCrossReferences() const { return xrefs_; }
+        const std::map<int, InstructionDataFlow>& getDataFlow() const { return dataFlow_; }
 
         // Helper to get basic block by pc
         int getBlockIdByPc(int pc) const;
@@ -37,9 +44,11 @@ namespace Luaj {
         const LuajPrototype& pt_;
         std::vector<BasicBlock> basicBlocks_;
         CrossReferences xrefs_;
+        std::map<int, InstructionDataFlow> dataFlow_;
 
         void buildCFG();
         void buildXREFs();
+        void buildDataFlow();
 
         std::set<int> findLeaders() const;
     };
