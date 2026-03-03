@@ -1,0 +1,42 @@
+1. **Understand Luaj bytecode format:** Based on `DumpState.java` and `LoadState.java`, luaj has some specifics, though it closely models Lua 5.2.x.
+2. **Create a C++ module for disassembling Luaj bytecode:**
+    - Parse Header:
+        - Signature: `0x1B, 'L', 'u', 'a'`
+        - Version: 1 byte
+        - Format: 1 byte
+        - Endianness: 1 byte (0 = big endian, 1 = little endian)
+        - Size of int: 1 byte
+        - Size of size_t: 1 byte
+        - Size of Instruction: 1 byte
+        - Size of lua_Number: 1 byte
+        - Number Format: 1 byte (0 = floats/doubles, 1 = ints only, 4 = num patch int32)
+        - Tail: `0x19, 0x93, '\r', '\n', 0x1A, '\n'`
+    - Parse Function (Prototype):
+        - `linedefined` (int)
+        - `lastlinedefined` (int)
+        - `numparams` (byte)
+        - `is_vararg` (byte)
+        - `maxstacksize` (byte)
+        - **Code:**
+            - `n` (int) instructions
+            - Instructions (int array)
+        - **Constants:**
+            - `n` (int) constants
+            - Types: `LUA_TNIL=0`, `LUA_TBOOLEAN=1`, `LUA_TNUMBER=3`, `LUA_TSTRING=4`, `LUA_TINT= -2` (Wait, Luaj has `TINT` for num patch int32. Need to check `LuaValue.TINT`)
+            - Then `n` inner prototypes
+        - **Upvalues:**
+            - `n` (int) upvalues
+            - `instack` (byte)
+            - `idx` (byte)
+        - **Debug:**
+            - `source` (string) if not stripped
+            - `lineinfo` (int array)
+            - `locvars` (array of string, int, int)
+            - `upvalue names` (array of string)
+3. **Implement C++ Parser:**
+    - Read primitive types respecting endianness.
+    - Read strings: size (int), then size-1 bytes of data, 1 byte trailing zero.
+    - Format output similarly to `luac -l`.
+    - Create main entry point.
+4. **Provide a Makefile or instructions:**
+    - So the user can easily compile and run the tool.
